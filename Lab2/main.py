@@ -1,127 +1,87 @@
+import graphviz
 from graphviz import Digraph
 
+nd_table = {}
+d_table = {}
+unused_st = []
+used_st = set()
+alphabet = set()
 
-class FiniteAutomaton:
-    def __init__(self):
-        self.transitions = {}
-        self.final_states = set()
-        self.initial_state = 'q0'
+def make_state(v):
+    name = ''.join(v)
+    for i in alphabet:
+        for j in v:
+            tmp_pair = (j, i)
+            if tmp_pair in nd_table:
+                tmp_vec = nd_table[tmp_pair]
+                nd_table[(name, i)] = nd_table[(name, i)].union(tmp_vec) if (name, i) in nd_table else tmp_vec
+    return name
 
-    def add_transition(self, current_state, symbol, next_state):
-        if current_state not in self.transitions:
-            self.transitions[current_state] = {}
-        if symbol in self.transitions[current_state]:
-            raise Exception(f"Невозможный переход: {current_state} по символу {symbol} уже определен")
-        self.transitions[current_state][symbol] = next_state
+def print_table(table):
+    for k, v in table.items():
+        print(f"{k[0]},{k[1]}={v}")
 
-    def is_deterministic(self):
-        for current_state, symbols in self.transitions.items():
-            if len(symbols) != len(set(symbols.keys())):
-                return False
-        return True
-
-    def __repr__(self):
-        representation = []
-        for state, transitions in self.transitions.items():
-            for symbol, next_state in transitions.items():
-                representation.append(f"{state},{symbol}={next_state}")
-        return "\n".join(representation)
-
-
-def read_automaton_from_file(filename):
-    fa = FiniteAutomaton()
-
-    with open(filename, 'r') as file:
-        for line in file:
-            line = line.strip()
-            if not line:
+def determ():
+    alph_size = len(alphabet)
+    while unused_st:
+        Qcur = unused_st.pop(0)
+        for i in alphabet:
+            tmp_pair = (Qcur, i)
+            if tmp_pair not in nd_table:
                 continue
+            tmp_vec = nd_table[tmp_pair]
+            state = make_state(tmp_vec)
+            if state not in used_st:
+                unused_st.append(state)
+            d_table[tmp_pair] = state
+            used_st.add(Qcur)
 
-            parts = line.split('=')
-            left = parts[0].strip()
-            right = parts[1].strip()
+def parse_automate(file_name):
+    with open(file_name, 'r') as file:
+        for str in file:
+            str = str.strip()
+            if '=' not in str:
+                print(f"Skipping invalid line: {str}")
+                continue
+            q, rest = str.split(',', 1)
+            c, f = rest.split('=')
+            unused_st.append(q)
+            alphabet.add(c)
+            nd_table.setdefault((q, c), set()).add(f)
+    is_determ = all(len(v) <= 2 for v in nd_table.values())
+    if is_determ:
+        for k, v in nd_table.items():
+            d_table[k] = next(iter(v))
+    else:
+        determ()
+        print_table(d_table)
 
-            current = left.split(',')
-            next_state = right.strip()
+def parse_str(str):
+    Qcur = "q0"
+    for i in str:
+        tmp_pair = (Qcur, i)
+        if tmp_pair not in d_table:
+            return -1
+        Qcur = d_table[tmp_pair]
+        if 'f' in Qcur and i == str[-1]:
+            return 0
+        elif 'f' not in Qcur and i == str[-1]:
+            return -1
+    return -1
 
-            qN = current[0]  # q<N>
-            C = current[1]   # <C>
-            if next_state.startswith('f'):
-                fa.final_states.add(next_state[1:])  # добавляем финальное состояние
-                next_state = next_state[1:]  # убираем 'f'
+def parsing_loop():
+    while True:
+        str = input()
+        ret = parse_str(str)
+        print("Valid string" if ret == 0 else "Not a valid string")
 
-            fa.add_transition(qN, C, next_state)
-
-    return fa
-
-
-def determinize(fa):
-    new_fa = FiniteAutomaton()
-    unvisited_states = {fa.initial_state}
-    new_state_mapping = {fa.initial_state: 'q0'}
-    state_counter = 1
-
-    while unvisited_states:
-        current_state = unvisited_states.pop()
-        for symbol, next_state in fa.transitions.get(current_state, {}).items():
-            if next_state not in new_state_mapping:
-                new_state_mapping[next_state] = f'q{state_counter}'
-                state_counter += 1
-                unvisited_states.add(next_state)
-            new_fa.add_transition(new_state_mapping[current_state], symbol, new_state_mapping[next_state])
-
-    for original_state, mapped_state in new_state_mapping.items():
-        if original_state in fa.final_states:
-            new_fa.final_states.add(mapped_state)
-
-    return new_fa
-
-
-def analyze_string(fa, input_string):
-    current_state = fa.initial_state
-    for symbol in input_string:
-        if current_state not in fa.transitions or symbol not in fa.transitions[current_state]:
-            return False  # Перехода нет, строка не принимается
-        current_state = fa.transitions[current_state][symbol]
-
-    return current_state in fa.final_states
-
-
-def visualize_automaton(fa):
+def visualize_graph():
     dot = Digraph()
-
-    for state in fa.transitions:
-        if state in fa.final_states:
-            dot.node(state, shape='doublecircle')
-        else:
-            dot.node(state)
-
-    for state in fa.transitions:
-        for symbol, next_state in fa.transitions[state].items():
-            dot.edge(state, next_state, label=symbol)
-
-    dot.render('automaton', format='png', cleanup=True)
-
+    for k, v in d_table.items():
+        dot.edge(k[0], v, label=k[1])
+    dot.render('graph.gv', view=True)
 
 if __name__ == "__main__":
-    filename = 'transitions.txt'  # укажите путь к вашему файлу
-    input_string = input("Введите строку для анализа: ")
-
-    fa = read_automaton_from_file(filename)
-
-    if fa.is_deterministic():
-        print("Автомат детерминирован.")
-    else:
-        print("Автомат недетерминирован.")
-
-    determinized_fa = determinize(fa)
-    print("Детерминизированный автомат:")
-    print(determinized_fa)
-
-    if analyze_string(fa, input_string):
-        print(f"Строка '{input_string}' принимается автоматом.")
-    else:
-        print(f"Строка '{input_string}' не принимается автоматом.")
-
-    # Визуализация автомата
-    visualize_automaton(fa)
+    parse_automate("transitions.txt")
+    visualize_graph()
+    parsing_loop()
